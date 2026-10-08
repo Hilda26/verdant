@@ -1,0 +1,1 @@
+export const STUDIONET_CHAIN_ID = 61999;
