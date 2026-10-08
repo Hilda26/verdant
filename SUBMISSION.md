@@ -6,7 +6,7 @@ Verdant Relay is proof-backed accountability for environmental commitments. A st
 
 - Project name: `Verdant Relay`
 - Category/tag: `Governance`, `DeFi`, or `Other`
-- Live app: `https://verdant-auras-projects-2f862c53.vercel.app`
+- Live app: `https://verdant-protocole.vercel.app`
 - GitHub repository: `https://github.com/Hilda26/verdant`
 - Network: `GenLayer StudioNet`
 - Contract address: `0x27101Dd16615F6D78D112F897369cEA6190b7FD9`

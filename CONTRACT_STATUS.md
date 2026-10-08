@@ -28,7 +28,7 @@ Deployed on GenLayer StudioNet:
 ```text
 Contract: 0x27101Dd16615F6D78D112F897369cEA6190b7FD9
 Tx: 0xed39da562dc7194762f15a4f28fc5c1ccbccadeded0de176f012e35dc38bf72c
-Vercel: https://verdant-auras-projects-2f862c53.vercel.app
+Vercel: https://verdant-protocole.vercel.app
 ```
 
 Redeploy with:
