@@ -6,13 +6,13 @@ Verdant Relay is proof-backed accountability for environmental commitments. A st
 
 - Project name: `Verdant Relay`
 - Category/tag: `Governance`, `DeFi`, or `Other`
-- Live app: `https://project-12-kohl-omega.vercel.app`
+- Live app: `https://verdant-auras-projects-2f862c53.vercel.app`
 - GitHub repository: `https://github.com/Hilda26/verdant`
 - Network: `GenLayer StudioNet`
 - Contract address: `0x27101Dd16615F6D78D112F897369cEA6190b7FD9`
 - Deployment tx: `0xed39da562dc7194762f15a4f28fc5c1ccbccadeded0de176f012e35dc38bf72c`
 - One-liner: `Verdant Relay turns environmental promises into staked, evidence-scored commitments on GenLayer.`
-- Access note: Vercel deployment protection is enabled until owner approval disables authentication for reviewers.
+- Access note: Vercel deployment protection is disabled; reviewers can open the app directly.
 
 ## Highlights
 
