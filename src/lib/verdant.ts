@@ -22,6 +22,8 @@ export type RelaySummary = {
   total_staked: string;
   stake_returned: string;
   stake_redirected: string;
+  total_evidence_bonded: string;
+  evidence_bonds_paid: string;
   impact_units_verified: string;
 };
 
@@ -77,6 +79,8 @@ export const EMPTY_RELAY: RelaySummary = {
   total_staked: "0",
   stake_returned: "0",
   stake_redirected: "0",
+  total_evidence_bonded: "0",
+  evidence_bonds_paid: "0",
   impact_units_verified: "0",
 };
 

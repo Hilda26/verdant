@@ -20,6 +20,7 @@ MAX_EVIDENCE_BYTES = 20000
 MAX_PAGE_SIZE = 50
 MIN_STAKE = 1
 MIN_EVIDENCE_BOND = 1
+EVIDENCE_TIMEOUT_SECONDS = 7 * 24 * 60 * 60
 
 PLEDGE_ACTIVE = "ACTIVE"
 PLEDGE_EVIDENCE_OPEN = "EVIDENCE_OPEN"
@@ -93,6 +94,8 @@ class VerdantRelay(gl.Contract):
     total_staked: u256
     stake_returned: u256
     stake_redirected: u256
+    total_evidence_bonded: u256
+    evidence_bonds_paid: u256
     impact_units_verified: u256
 
     def __init__(self):
@@ -104,6 +107,8 @@ class VerdantRelay(gl.Contract):
         self.total_staked = u256(0)
         self.stake_returned = u256(0)
         self.stake_redirected = u256(0)
+        self.total_evidence_bonded = u256(0)
+        self.evidence_bonds_paid = u256(0)
         self.impact_units_verified = u256(0)
 
     @gl.public.write.payable
@@ -179,7 +184,6 @@ class VerdantRelay(gl.Contract):
         if int(claimed_units) <= 0:
             raise gl.vm.UserError(f"{ERROR_EXPECTED} Claimed units must be positive")
         if self._is_expired(pledge):
-            self._expire_pledge(pledge)
             raise gl.vm.UserError(f"{ERROR_EXPECTED} Pledge deadline has passed")
 
         excerpt, digest = self._snapshot_url(evidence_url)
@@ -202,6 +206,7 @@ class VerdantRelay(gl.Contract):
         )
         self.evidence_ids.append(evidence_id)
         self.evidence_packets += u256(1)
+        self.total_evidence_bonded += u256(int(gl.message.value))
         pledge.status = PLEDGE_EVIDENCE_OPEN
         pledge.active_evidence_id = evidence_id
         pledge.evidence_count += u256(1)
@@ -245,9 +250,9 @@ class VerdantRelay(gl.Contract):
             self.impact_units_verified += pledge.target_units
             self.fulfilled_pledges += u256(1)
             self.stake_returned += pledge.stake
-            self._pay(pledge.steward, u256(int(pledge.stake) + int(packet.evidence_bond)))
+            self._pay(pledge.steward, pledge.stake)
+            self._return_evidence_bond(packet)
             pledge.stake = u256(0)
-            packet.evidence_bond = u256(0)
         elif review["verdict"] == EVIDENCE_PARTIAL and review["score"] >= 40:
             packet.status = EVIDENCE_PARTIAL
             pledge.status = PLEDGE_PARTIAL
@@ -258,27 +263,27 @@ class VerdantRelay(gl.Contract):
             redirected = u256(int(pledge.stake) - int(returned))
             self.stake_returned += returned
             self.stake_redirected += redirected
-            self._pay(pledge.steward, u256(int(returned) + int(packet.evidence_bond)))
+            self._pay(pledge.steward, returned)
             self._pay(pledge.beneficiary, redirected)
+            self._return_evidence_bond(packet)
             pledge.stake = u256(0)
-            packet.evidence_bond = u256(0)
         elif review["verdict"] == EVIDENCE_FAILED and review["score"] <= 39:
             packet.status = EVIDENCE_FAILED
             pledge.status = PLEDGE_FAILED
             self.failed_pledges += u256(1)
             self.stake_redirected += pledge.stake
             self._pay(pledge.beneficiary, pledge.stake)
+            self._return_evidence_bond(packet)
             pledge.stake = u256(0)
-            packet.evidence_bond = u256(0)
         else:
             packet.status = EVIDENCE_INCONCLUSIVE
             if self._is_expired(pledge):
-                self._expire_pledge(pledge)
+                self._expire_pledge(pledge, PLEDGE_EVIDENCE_OPEN)
             else:
+                old_status = pledge.status
                 pledge.status = PLEDGE_ACTIVE
-                self.active_pledges += u256(1)
-            self._pay(packet.reporter, packet.evidence_bond)
-            packet.evidence_bond = u256(0)
+                self._recount_active(old_status, pledge.status)
+            self._return_evidence_bond(packet)
 
         self.pledges[pledge.id] = pledge
         self.evidence[packet.id] = packet
@@ -286,11 +291,32 @@ class VerdantRelay(gl.Contract):
     @gl.public.write
     def expire_pledge(self, pledge_id: str) -> None:
         pledge = self._pledge(pledge_id)
-        if pledge.status != PLEDGE_ACTIVE:
+        if pledge.status not in (PLEDGE_ACTIVE, PLEDGE_EVIDENCE_OPEN):
             raise gl.vm.UserError(f"{ERROR_EXPECTED} Pledge cannot expire from its current state")
         if not self._is_expired(pledge):
             raise gl.vm.UserError(f"{ERROR_EXPECTED} Pledge has not reached deadline")
-        self._expire_pledge(pledge)
+        if pledge.status == PLEDGE_EVIDENCE_OPEN:
+            self._recover_pending_evidence(pledge)
+        self._expire_pledge(pledge, pledge.status)
+
+    @gl.public.write
+    def recover_unresolved_evidence(self, evidence_id: str) -> None:
+        packet = self._evidence(evidence_id)
+        if packet.status != EVIDENCE_PENDING:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} Evidence is not pending")
+        pledge = self._pledge(packet.pledge_id)
+        if pledge.status != PLEDGE_EVIDENCE_OPEN or pledge.active_evidence_id != evidence_id:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} Pledge is not bound to this evidence")
+        if not self._evidence_timed_out(packet):
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} Evidence timeout has not elapsed")
+        self._recover_pending_evidence(pledge)
+        if self._is_expired(pledge):
+            self._expire_pledge(pledge, pledge.status)
+        else:
+            old_status = pledge.status
+            pledge.status = PLEDGE_ACTIVE
+            self._recount_active(old_status, pledge.status)
+            self.pledges[pledge.id] = pledge
 
     @gl.public.view
     def get_relay(self) -> dict:
@@ -303,6 +329,8 @@ class VerdantRelay(gl.Contract):
             "total_staked": str(self.total_staked),
             "stake_returned": str(self.stake_returned),
             "stake_redirected": str(self.stake_redirected),
+            "total_evidence_bonded": str(self.total_evidence_bonded),
+            "evidence_bonds_paid": str(self.evidence_bonds_paid),
             "impact_units_verified": str(self.impact_units_verified),
         }
 
@@ -374,7 +402,7 @@ Return JSON only:
                 leader_fields = self._review_fields(getattr(leader_result, "calldata", None))
                 validator_result = gl.nondet.exec_prompt(prompt, response_format="json")
                 validator_fields = self._review_fields(validator_result)
-                return leader_fields is not None and leader_fields == validator_fields
+                return self._review_equivalent(leader_fields, validator_fields)
             except Exception:
                 return False
 
@@ -401,6 +429,24 @@ Return JSON only:
             return None
         return (verdict, score)
 
+    def _review_equivalent(self, leader_fields: tuple | None, validator_fields: tuple | None) -> bool:
+        if leader_fields is None or validator_fields is None:
+            return False
+        leader_verdict, leader_score = leader_fields
+        validator_verdict, validator_score = validator_fields
+        if leader_verdict != validator_verdict:
+            return False
+        if self._settlement_lane(leader_score) != self._settlement_lane(validator_score):
+            return False
+        return abs(int(leader_score) - int(validator_score)) <= 7
+
+    def _settlement_lane(self, score: int) -> str:
+        if score >= 90:
+            return EVIDENCE_FULFILLED
+        if score >= 40:
+            return EVIDENCE_PARTIAL
+        return EVIDENCE_FAILED
+
     def _snapshot_url(self, url: str) -> tuple[str, str]:
         def fetch() -> str:
             response = gl.nondet.web.get(url)
@@ -418,13 +464,43 @@ Return JSON only:
         excerpt = self._defang(body.decode("utf-8", errors="replace"))[:6000]
         return excerpt, digest
 
-    def _expire_pledge(self, pledge: Pledge) -> None:
+    def _expire_pledge(self, pledge: Pledge, old_status: str) -> None:
         pledge.status = PLEDGE_EXPIRED
-        self.active_pledges -= u256(1)
+        self._recount_active(old_status, pledge.status)
         self.stake_redirected += pledge.stake
         self._pay(pledge.beneficiary, pledge.stake)
         pledge.stake = u256(0)
         self.pledges[pledge.id] = pledge
+
+    def _recover_pending_evidence(self, pledge: Pledge) -> None:
+        packet = self._evidence(pledge.active_evidence_id)
+        if packet.status != EVIDENCE_PENDING:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} Evidence is not pending")
+        if not self._evidence_timed_out(packet):
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} Evidence timeout has not elapsed")
+        packet.status = EVIDENCE_INCONCLUSIVE
+        packet.verdict = EVIDENCE_INCONCLUSIVE
+        packet.rationale = "Evidence review timed out before final adjudication."
+        packet.reviewed_at = self._now()
+        pledge.active_evidence_id = ""
+        pledge.last_score = u256(0)
+        pledge.review_rationale = packet.rationale
+        self._return_evidence_bond(packet)
+        self.evidence[packet.id] = packet
+
+    def _return_evidence_bond(self, packet: EvidencePacket) -> None:
+        if int(packet.evidence_bond) > 0:
+            self.evidence_bonds_paid += packet.evidence_bond
+            self._pay(packet.reporter, packet.evidence_bond)
+            packet.evidence_bond = u256(0)
+
+    def _recount_active(self, old_status: str, new_status: str) -> None:
+        if old_status == new_status:
+            return
+        if old_status == PLEDGE_ACTIVE and int(self.active_pledges) > 0:
+            self.active_pledges -= u256(1)
+        if new_status == PLEDGE_ACTIVE:
+            self.active_pledges += u256(1)
 
     def _pledge(self, pledge_id: str) -> Pledge:
         if pledge_id not in self.pledges:
@@ -509,12 +585,14 @@ Return JSON only:
     def _is_expired(self, pledge: Pledge) -> bool:
         return self._parse_timestamp(pledge.deadline) <= self._now_timestamp()
 
+    def _evidence_timed_out(self, packet: EvidencePacket) -> bool:
+        return self._parse_timestamp(packet.filed_at) + EVIDENCE_TIMEOUT_SECONDS <= self._now_timestamp()
+
     def _defang(self, value: str) -> str:
         return str(value).replace("</", "< /").replace("```", "` ` `").strip()
 
     def _now(self) -> str:
-        raw = str(gl.message_raw.get("datetime", ""))
-        return raw if raw != "" else datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     def _now_timestamp(self) -> int:
         return self._parse_timestamp(self._now())

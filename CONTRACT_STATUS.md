@@ -6,7 +6,10 @@
 - Stewards can open staked environmental pledges through `open_pledge`.
 - Reporters can submit public evidence packets through `submit_evidence`.
 - Validators review evidence with `review_evidence`, returning fulfilled, partial, failed, or inconclusive lanes.
-- The contract records source and evidence hashes, verified units, review scores, payout direction, and relay-level totals.
+- Pending evidence can be recovered after a seven-day timeout through `recover_unresolved_evidence`.
+- The contract records source and evidence hashes, verified units, review scores, payout direction, evidence-bond totals, and relay-level totals.
+- Partial settlement is explicit: verified units are `min(target_units, max(1, claimed_units * score // 100))`, and steward stake is split 50/50 between steward return and beneficiary redirect.
+- Evidence authenticity is limited to fetched excerpts, hashes, and validator assessment; Verdant Relay does not cryptographically prove real-world off-chain artifacts are genuine.
 - Frontend reads are proxied through `/api/verdant/read` to avoid browser-side RPC/CORS failures.
 
 ## Local Verification
@@ -19,6 +22,7 @@ npm run lint
 npm test
 npm run build
 python -m pytest tests/direct -q
+python -m pytest tests/integration -q -s
 ```
 
 ## Deployment
@@ -26,8 +30,8 @@ python -m pytest tests/direct -q
 Deployed on GenLayer StudioNet:
 
 ```text
-Contract: 0x27101Dd16615F6D78D112F897369cEA6190b7FD9
-Tx: 0xed39da562dc7194762f15a4f28fc5c1ccbccadeded0de176f012e35dc38bf72c
+Contract: 0x6688bd877464CF5AC3a2Af94FB67962fC6106A3f
+Tx: 0x2b3500f6c6c76a73b57d033f02ea30d61cf379c097e4f0a6447101637c809d32
 Vercel: https://verdant-protocole.vercel.app
 ```
 

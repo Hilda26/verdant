@@ -175,6 +175,14 @@ input, textarea {
 }
 textarea { min-height: 104px; resize: vertical; }
 .form-panel button { margin-top: 16px; }
+.action-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.action-row button { margin-top: 0; }
+button:disabled {
+  cursor: not-allowed;
+  opacity: .48;
+  transform: none;
+  box-shadow: 4px 4px 0 var(--ink);
+}
 
 .pledge-list, .pledges-grid { display: grid; gap: 16px; }
 .pledges-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -7,6 +7,7 @@ const required = [
   "def submit_evidence",
   "def review_evidence",
   "def expire_pledge",
+  "def recover_unresolved_evidence",
   "def get_relay",
   "def list_pledges",
   "def list_evidence",

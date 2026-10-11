@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, FileCheck, Leaf, RefreshCw } from "lucide-react";
 import { loadPledge, type EvidencePacket, type Pledge } from "@/lib/verdant";
+import { PledgeActions } from "@/components/pledge-actions";
 
 export default function PledgeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -48,6 +49,7 @@ export default function PledgeDetailPage({ params }: { params: Promise<{ id: str
             <Stat label="Last score" value={`${pledge.last_score}%`} />
             <Stat label="Stake" value={`${pledge.stake} GEN`} />
           </section>
+          <PledgeActions pledge={pledge} evidence={evidence} onSettled={refresh} />
           <section className="panel">
             <div className="section-label"><FileCheck size={16} /> Evidence trail</div>
             <div className="evidence-list">
