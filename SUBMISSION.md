@@ -13,6 +13,7 @@ Verdant Relay is proof-backed accountability for environmental commitments. A st
 - Deployment tx: `0x2b3500f6c6c76a73b57d033f02ea30d61cf379c097e4f0a6447101637c809d32`
 - One-liner: `Verdant Relay turns environmental promises into staked, evidence-scored commitments on GenLayer.`
 - Access note: Vercel deployment protection is disabled; reviewers can open the app directly.
+- Review proof: `review.md` contains the deployed-contract StudioNet transaction hashes, transfer receipts, accounting assertions, and deployed-source match confirmation.
 
 ## Highlights
 
@@ -59,4 +60,10 @@ npm test
 npm run build
 python -m pytest tests/direct -q
 python -m pytest tests/integration -q -s
+```
+
+For the steward follow-up, the deployed-contract proof command is:
+
+```bash
+python -m pytest tests/integration/test_verdant_lifecycle_e2e.py::test_studionet_deployed_contract_frontend_write_methods_finalize -q -s
 ```

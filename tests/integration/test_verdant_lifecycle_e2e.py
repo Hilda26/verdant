@@ -12,6 +12,7 @@ from genlayer_py.provider.provider import GenLayerProvider
 
 
 CONTRACTS = Path(__file__).parents[2] / "contracts"
+DEPLOYED_CONTRACT = "0x6688bd877464CF5AC3a2Af94FB67962fC6106A3f"
 WAIT_FINAL = {
     "wait_transaction_status": TransactionStatus.FINALIZED,
     "wait_interval": 5000,
@@ -112,6 +113,11 @@ def _deploy(steward):
     assert tx_execution_succeeded(receipt), receipt
     _record("deploy", receipt)
     return factory.build_contract(contract_address=extract_contract_address(receipt), account=steward)
+
+
+def _deployed_relay(steward):
+    factory = get_contract_factory(contract_file_path=CONTRACTS / "VerdantRelay.py")
+    return factory.build_contract(contract_address=DEPLOYED_CONTRACT, account=steward)
 
 
 def _open(relay, steward, beneficiary, pledge_id, deadline, context):
@@ -263,3 +269,67 @@ def test_studionet_e2e_accounts_for_all_payout_lanes():
     assert summary["total_evidence_bonded"] == "5"
     assert summary["evidence_bonds_paid"] == "5"
     print("VERDANT_E2E_SUMMARY " + json.dumps(summary, sort_keys=True))
+
+
+def test_studionet_deployed_contract_frontend_write_methods_finalize():
+    steward, reporter, beneficiary = _accounts()
+    client = get_gl_client()
+    relay = _deployed_relay(steward)
+    run_id = str(int(time.time()))
+
+    scenarios = [
+        ("fulfilled", "FULFILLED", 96, "FULFILLED", {"steward": 5, "reporter": 1}),
+        ("partial", "PARTIAL", 50, "PARTIAL", {"steward": 2, "beneficiary": 3, "reporter": 1}),
+        ("failed", "FAILED", 10, "FAILED", {"beneficiary": 5, "reporter": 1}),
+        ("inconclusive", "INCONCLUSIVE", 30, "ACTIVE", {"reporter": 1}),
+    ]
+
+    before_summary = relay.get_relay(args=[]).call()
+    before_staked = int(before_summary["total_staked"])
+    before_bonded = int(before_summary["total_evidence_bonded"])
+    before_bonds_paid = int(before_summary["evidence_bonds_paid"])
+
+    for label, verdict, score, final_status, expected_transfers in scenarios:
+        pledge_id = f"live-{run_id}-{label}"
+        evidence_id = f"{pledge_id}-evidence"
+        context = _context(verdict, score, PUBLIC_SOURCE_URL, PUBLIC_EVIDENCE_URL, "2026-01-01T00:00:00Z")
+        _open(relay, steward, beneficiary, pledge_id, "2026-12-31T23:59:59Z", context)
+        _submit(relay, reporter, pledge_id, evidence_id, context)
+        before_review = _balances(client, steward, reporter, beneficiary)
+        _review(relay, steward, evidence_id, context)
+        after_review = _balances(client, steward, reporter, beneficiary)
+        pledge = relay.get_pledge(args=[pledge_id]).call()
+        packet = relay.get_evidence(args=[evidence_id]).call()
+        assert pledge["status"] == final_status
+        assert packet["reporter"].lower() == reporter.address.lower()
+        assert packet["evidence_bond"] == "0"
+        for key, amount in expected_transfers.items():
+            _assert_delta(before_review, after_review, key, amount)
+
+    expired_context = _context("INCONCLUSIVE", 0, PUBLIC_SOURCE_URL, PUBLIC_EVIDENCE_URL, "2026-01-01T00:00:00Z")
+    expired_id = f"live-{run_id}-expired"
+    _open(relay, steward, beneficiary, expired_id, "2026-01-02T00:00:00Z", expired_context)
+    before_expire = _balances(client, steward, reporter, beneficiary)
+    _expire(relay, steward, expired_id, {**expired_context, "genvm_datetime": "2026-01-03T00:00:00Z"})
+    after_expire = _balances(client, steward, reporter, beneficiary)
+    assert relay.get_pledge(args=[expired_id]).call()["status"] == "EXPIRED"
+    _assert_delta(before_expire, after_expire, "beneficiary", 5)
+
+    timeout_context = _context("INCONCLUSIVE", 0, PUBLIC_SOURCE_URL, PUBLIC_EVIDENCE_URL, "2026-01-01T00:00:00Z")
+    timeout_id = f"live-{run_id}-timeout"
+    timeout_evidence_id = f"{timeout_id}-evidence"
+    _open(relay, steward, beneficiary, timeout_id, "2026-12-31T23:59:59Z", timeout_context)
+    _submit(relay, reporter, timeout_id, timeout_evidence_id, timeout_context)
+    before_recover = _balances(client, steward, reporter, beneficiary)
+    _recover(relay, steward, timeout_evidence_id, {**timeout_context, "genvm_datetime": "2026-01-09T00:00:00Z"})
+    after_recover = _balances(client, steward, reporter, beneficiary)
+    assert relay.get_pledge(args=[timeout_id]).call()["status"] == "ACTIVE"
+    assert relay.get_evidence(args=[timeout_evidence_id]).call()["status"] == "INCONCLUSIVE"
+    _assert_delta(before_recover, after_recover, "reporter", 1)
+
+    summary = relay.get_relay(args=[]).call()
+    assert int(summary["total_staked"]) == before_staked + 30
+    assert int(summary["total_evidence_bonded"]) == before_bonded + 5
+    assert int(summary["evidence_bonds_paid"]) == before_bonds_paid + 5
+    print("VERDANT_DEPLOYED_E2E_ADDRESS " + DEPLOYED_CONTRACT)
+    print("VERDANT_DEPLOYED_E2E_SUMMARY " + json.dumps(summary, sort_keys=True))
